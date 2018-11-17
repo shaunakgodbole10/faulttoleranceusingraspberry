@@ -1,0 +1,415 @@
+# import the necessary packages
+
+import numpy as np
+import os
+import sys
+sys.path.append('/usr/local/lib/python3.4/site-packages')
+sys.path.append('/usr/local/lib/python2.7/dist-packages')
+sys.path.append('/usr/local/lib/python3.4/dist-packages')
+import RPi.GPIO as GPIO
+#import subprocess
+from scipy.spatial import distance as dist
+from imutils import perspective
+from imutils import contours
+import numpy as np
+import argparse
+import imutils
+import cv2
+from scipy.spatial import distance as dist
+import argparse
+import time
+import datetime
+from datetime import datetime
+from datetime import timedelta
+
+GPIO.setwarnings(False)
+
+GPIO.setmode(GPIO.BCM)
+#subprocess.call('setterm -cursor off', shell=True)
+#subprocess.call('spincl -ib', shell=True)
+#### Main program
+# Camera 0 is the integrated web cam on my netbook
+camera_port = 0
+ 
+#Number of frames to throw away while the camera adjusts to light levels
+ramp_frames = 30
+ 
+
+camera = cv2.VideoCapture(camera_port)
+
+GREEN = 19
+RED = 26
+# Define GPIO to LCD mapping
+LCD_RS = 7
+LCD_E  = 22
+LCD_D4 = 25
+LCD_D5 = 24
+LCD_D6 = 23
+LCD_D7 = 18
+
+# Define some device constants
+LCD_WIDTH = 16    # Maximum characters per line
+LCD_CHR = True
+LCD_CMD = False
+ 
+LCD_LINE_1 = 0x80 # LCD RAM address for the 1st line
+LCD_LINE_2 = 0xC0 # LCD RAM address for the 2nd line
+# Timing constants
+E_PULSE = 0.0005
+E_DELAY = 0.0005
+ 
+
+def lcd_init():
+  # Initialise display
+  lcd_byte(0x33,LCD_CMD) # 110011 Initialise
+  lcd_byte(0x32,LCD_CMD) # 110010 Initialise
+  lcd_byte(0x06,LCD_CMD) # 000110 Cursor move direction
+  lcd_byte(0x0C,LCD_CMD) # 001100 Display On,Cursor Off, Blink Off
+  lcd_byte(0x28,LCD_CMD) # 101000 Data length, number of lines, font size
+  lcd_byte(0x01,LCD_CMD) # 000001 Clear display
+  time.sleep(E_DELAY)
+ 
+def lcd_byte(bits, mode):
+  # Send byte to data pins
+  # bits = data
+  # mode = True  for character
+  #        False for command
+ 
+  GPIO.output(LCD_RS, mode) # RS
+ 
+  # High bits
+  GPIO.output(LCD_D4, False)
+  GPIO.output(LCD_D5, False)
+  GPIO.output(LCD_D6, False)
+  GPIO.output(LCD_D7, False)
+  if bits&0x10==0x10:
+    GPIO.output(LCD_D4, True)
+  if bits&0x20==0x20:
+    GPIO.output(LCD_D5, True)
+  if bits&0x40==0x40:
+    GPIO.output(LCD_D6, True)
+  if bits&0x80==0x80:
+    GPIO.output(LCD_D7, True)
+ 
+  # Toggle 'Enable' pin
+  lcd_toggle_enable()
+ 
+  # Low bits
+  GPIO.output(LCD_D4, False)
+  GPIO.output(LCD_D5, False)
+  GPIO.output(LCD_D6, False)
+  GPIO.output(LCD_D7, False)
+  if bits&0x01==0x01:
+    GPIO.output(LCD_D4, True)
+  if bits&0x02==0x02:
+    GPIO.output(LCD_D5, True)
+  if bits&0x04==0x04:
+    GPIO.output(LCD_D6, True)
+  if bits&0x08==0x08:
+    GPIO.output(LCD_D7, True)
+ 
+  # Toggle 'Enable' pin
+  lcd_toggle_enable()
+ 
+def lcd_toggle_enable():
+  # Toggle enable
+  time.sleep(E_DELAY)
+  GPIO.output(LCD_E, True)
+  time.sleep(E_PULSE)
+  GPIO.output(LCD_E, False)
+  time.sleep(E_DELAY)
+ 
+def lcd_string(message,line):
+  # Send string to display
+ 
+  message = message.ljust(LCD_WIDTH," ")
+ 
+  lcd_byte(line, LCD_CMD)
+ 
+  for i in range(LCD_WIDTH):
+    lcd_byte(ord(message[i]),LCD_CHR)
+
+
+														
+def dispnum(num,stcol,endcol,dp,line):
+    str1 =[]
+    #str1[16]
+    #str1 =[]
+    for i in range(0,16):
+        str1.append(0)
+        j=0 
+    for i in range(endcol+1,stcol,-1):# Step -1:
+       #print i
+        lcd_byte(line+endcol-j, LCD_CMD)
+        if(dp == (i-1)):
+            #str1.insert(i-1,'.')
+            x= 0x2E
+        else:
+            a=(num % 10)
+            x=int(a)+int(0x30) 
+            num =int(num/10)
+        lcd_byte(int(x),LCD_CHR)
+        j=j+1
+
+ 
+
+
+#### bwareaopen definition
+def bwareaopen(imgBW, areaPixels):
+    # Given a black and white image, first find all of its contours
+    imgBWcopy = imgBW.copy()
+    contours = cv2.findContours(imgBWcopy.copy(), cv2.RETR_LIST, 
+        cv2.CHAIN_APPROX_SIMPLE)
+
+    # For each contour, determine its total occupying area
+    for idx in np.arange(len(contours)):
+        area = cv2.contourArea(contours[idx])
+        if (area >= 0 and area <= areaPixels):
+            cv2.drawContours(imgBWcopy, contours, idx, (0,0,0), -1)
+
+    return imgBWcopy
+#### imclearborder definition
+def midpoint(ptA, ptB):
+	return ((ptA[0] + ptB[0]) * 0.5, (ptA[1] + ptB[1]) * 0.5)
+
+
+
+ 
+# Captures a single image from the camera and returns it in PIL format
+def get_image():
+ # read is the easiest way to get a full image out of a VideoCapture object.
+ retval, im = camera.read()
+ return im
+
+#subprocess.call('clear', shell=True)
+while(True):
+
+    GPIO.setmode(GPIO.BCM)       # Use BCM GPIO numbers
+    GPIO.setup(GREEN, GPIO.OUT)  
+    GPIO.setup(RED, GPIO.OUT) 
+    GPIO.output(GREEN, True)
+    GPIO.output(RED, True)
+    GPIO.setup(LCD_E, GPIO.OUT)  # E
+    GPIO.setup(LCD_RS, GPIO.OUT) # RS
+    GPIO.setup(LCD_D4, GPIO.OUT) # DB4
+    GPIO.setup(LCD_D5, GPIO.OUT) # DB5
+    GPIO.setup(LCD_D6, GPIO.OUT) # DB6
+    GPIO.setup(LCD_D7, GPIO.OUT) # DB7
+    print("Init 1")
+    lcd_init()
+    print("Init 2")
+    lcd_string("Rasbperry Pi_",LCD_LINE_1)
+    print("Init 3")
+      
+    for i in range(ramp_frames):
+     temp = get_image()
+    print("Tking image...")
+
+    # load the image, convert it to grayscale, and blur it slightly
+
+    #image=cv2.imread("/root/Desktop/Fruit/test1.jpg")
+    camera_capture = get_image()
+    cv2.waitKey(500)
+    camera_capture = get_image()
+    cv2.waitKey(500)
+    camera_capture = get_image()
+    cv2.waitKey(500)
+    file = "test.jpg"
+    cv2.imwrite(file, camera_capture)
+    print("saving image...") 
+    #del(camera)
+
+    lcd_string("Reading Image   ",LCD_LINE_1)
+    img=cv2.imread("test.jpg")
+    print("HELLO")
+    cv2.imshow("img",img)
+    cv2.waitKey(500)
+    print("HELLO")
+    ##print (img.shape)
+    r = 100.0 /img.shape[1]
+    dim  = (100,int(img.shape[0] * r))
+    resized=cv2.resize(img, dim, interpolation = cv2.INTER_AREA)
+    cv2.imshow("resized",resized)
+    #cv2.waitKey(0)
+    print("Image Resized")
+    cv2.waitKey(2500)
+    #img=resized
+
+    lcd_string("Processing Image",LCD_LINE_2)
+    # Number of rows and columns
+    rows = img.shape[0]
+    cols = img.shape[1]
+    print(rows)
+    print(cols)
+    # Remove some columns from the beginning and end
+    #img = img[:, 59:cols-20]
+
+    # Number of rows and columns
+    rows = img.shape[0]
+    cols = img.shape[1]
+
+
+
+    image=img
+    gray_image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    hsv_image = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    cv2.imwrite('gray_image.png',gray_image)
+    cv2.imwrite('hsv_image.png',hsv_image)
+
+    print ('HSV.dtype: ',hsv_image.dtype)
+    print ('HSV.size: ',hsv_image.size)#total no of pixels access
+    print ('HSV shape: ',hsv_image.shape)#[row,columns]
+    #print 'GRAY.size: ',gray_image.size 
+    b,g,r =cv2.split(hsv_image)
+    print ('b',b)
+    print ('G',g)
+    print ('r',r)
+
+    #lower_brown = np.array([40,20,30])
+    #upper_brown = np.array([100,250,250])
+    lower_brown = np.array([40,20,30])
+    upper_brown = np.array([160,250,250])
+
+    #lower_brown = np.array([0,0,0])
+    #upper_brown = np.array([60,250,255])
+    mask = cv2.inRange(hsv_image, lower_brown, upper_brown)
+    #mask=~mask1
+    cv2.imshow('mask',mask)
+    cv2.waitKey(500)
+    ###m1=cv2.cvtColor(mask, cv2.COLOR_HSV2BGR)
+    ###m2 = cv2.cvtColor(m1, cv2.COLOR_BGR2GRAY)
+    ##(thresh,bw)=cv2.threshold(mask,128,255,cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    ###cv2.imshow('bw',bw)
+    ##cleaned= bwareaopen(bw,100)
+    ###cleaned = morphology.remove_small_objects(bw, min_size=100, connectivity=2)
+    ##cv2.imshow('cleaned',cleaned)
+    ##cnts = cv2.findContours(cleaned,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
+    ##flg=0
+    ##
+    ##pixelsPerMetric = None
+    cv2.imshow('mask',mask)
+    print 'HSV.size: ',hsv_image.size
+    edged=mask  
+    # find contours in the edge map
+    cnts = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE)
+    cnts = cnts[0] if imutils.is_cv2() else cnts[1]
+     
+    # sort the contours from left-to-right and initialize the
+    # 'pixels per metric' calibration variable
+    (cnts, _) = contours.sort_contours(cnts)
+    pixelsPerMetric1 = None
+    pixelsPerMetric2 = None
+
+
+    # loop over the contours individually
+    print "stepB"
+    c1=0
+    for c in cnts:
+            # if the contour is not sufficiently large, ignore it
+            #print "step"
+            #print (cv2.contourArea(c))
+            if cv2.contourArea(c) < 1000:
+                    if c1>0: break
+                    else: continue
+            c1=c1+1
+            print(c1)
+            # compute the rotated bounding box of the contour
+            orig = image.copy()
+            box = cv2.minAreaRect(c)
+            box = cv2.cv.BoxPoints(box) if imutils.is_cv2() else cv2.boxPoints(box)
+            box = np.array(box, dtype="int")
+
+            # order the points in the contour such that they appear
+            # in top-left, top-right, bottom-right, and bottom-left
+            # order, then draw the outline of the rotated bounding
+            # box
+            box = perspective.order_points(box)
+            cv2.drawContours(orig, [box.astype("int")], -1, (0, 255, 0), 2)
+
+            # loop over the original points and draw them
+            for (x, y) in box:
+                    cv2.circle(orig, (int(x), int(y)), 5, (0, 0, 255), -1)
+
+            # unpack the ordered bounding box, then compute the midpoint
+            # between the top-left and top-right coordinates, followed by
+            # the midpoint between bottom-left and bottom-right coordinates
+            (tl, tr, br, bl) = box
+            (tltrX, tltrY) = midpoint(tl, tr)
+            (blbrX, blbrY) = midpoint(bl, br)
+
+            # compute the midpoint between the top-left and top-right points,
+            # followed by the midpoint between the top-righ and bottom-right
+            (tlblX, tlblY) = midpoint(tl, bl)
+            (trbrX, trbrY) = midpoint(tr, br)
+            print "stepC"
+            # draw the midpoints on the image
+            cv2.circle(orig, (int(tltrX), int(tltrY)), 5, (255, 0, 0), -1)
+            cv2.circle(orig, (int(blbrX), int(blbrY)), 5, (255, 0, 0), -1)
+            cv2.circle(orig, (int(tlblX), int(tlblY)), 5, (255, 0, 0), -1)
+            cv2.circle(orig, (int(trbrX), int(trbrY)), 5, (255, 0, 0), -1)
+
+            # draw lines between the midpoints
+            cv2.line(orig, (int(tltrX), int(tltrY)), (int(blbrX), int(blbrY)),
+                    (255, 0, 255), 2)
+            cv2.line(orig, (int(tlblX), int(tlblY)), (int(trbrX), int(trbrY)),
+                    (255, 0, 255), 2)
+            # compute the Euclidean distance between the midpoints
+            #print int(tlblX)
+            dA = dist.euclidean((tltrX, tltrY), (blbrX, blbrY))
+            dB = dist.euclidean((tlblX, tlblY), (trbrX, trbrY))
+            print("dA")
+            print(dA)
+            print("dB")
+            print(dB)
+            # if the pixels per metric has not been initialized, then
+            # compute it as the ratio of pixels to supplied metric
+            # (in this case, inches)
+            print "step1"
+            if pixelsPerMetric1 is None:
+                    pixelsPerMetric1 = 76 #dB / 0.001 #Set according to requirements
+                    print pixelsPerMetric1
+                    #args["width"]
+            if pixelsPerMetric2 is None:
+                    pixelsPerMetric2 = 72 #dB / 0.001 #Set according to requirements
+                    print pixelsPerMetric2
+            
+            # compute the size of the object
+            print "step2"
+            dimA = dA / pixelsPerMetric1
+            dimB = dB / pixelsPerMetric2
+            print("dimA")
+            print(dimA)
+            print("dimB")
+            print(dimB)
+            lcd_string("Len:            ",LCD_LINE_1)
+            dispnum(dimA,5,10,0,LCD_LINE_1)
+            lcd_string("Br:             ",LCD_LINE_2)
+            dispnum(dimB,5,10,0,LCD_LINE_1)
+            if(dimA < 3 and dimB < 4):
+                GPIO.output(GREEN, False)
+                GPIO.output(RED, True)
+            else:
+                GPIO.output(GREEN, True)
+                GPIO.output(RED, False)
+            
+    
+            cv2.putText(orig, "{:.1f}in".format(dimB),
+                    (int(tltrX - 15), int(tltrY - 10)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65, (255, 255, 255), 2)
+
+            cv2.putText(orig, "{:.1f}in".format(dimA),
+                    (int(trbrX + 10), int(trbrY)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65, (255, 255, 255), 2)
+            #print int(tltrX - 15)
+            #print "{:.1f}in".format(dimA)
+            abc=0.0
+            abc="{:.1f}".format(dimA)
+            cv2.imshow("Image", orig)
+            cv2.waitKey(5000)
+            print("New Image")
+          #cv2.waitKey(1000)
+print("exit")            
+cv2.destroyAllWindows()
+exit (0)
+
